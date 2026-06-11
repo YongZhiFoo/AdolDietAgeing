@@ -1,0 +1,696 @@
+---
+title: "Macronutrient intake and biological ageing in adolescents: A Nutritional Geometry approach"
+author: "Yong Zhi Foo, Therese A. O'Sullivan, Leigh W. Simmons"
+output: 
+  bookdown::word_document2:
+    toc: no
+    toc_depth: 6
+    number_sections: false
+    reference_docx: template.docx
+  bookdown::html_document2:
+    code_folding: hide
+    number_sections: no
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#kniter setting
+knitr::opts_chunk$set(
+message = FALSE,
+warning = FALSE, # no warnings
+cache = TRUE,# Cacheing to save time when kniting
+tidy = TRUE
+)
+
+# clear work space
+rm(list=ls())
+options(digits=2)
+
+#Set working directory to location of this script. This will work for anyone. So there is no need to change any of the directory-related codes in the script.
+
+dir.name <- dirname(rstudioapi::getActiveDocumentContext()$path)
+setwd(dir.name)
+getwd()
+
+#Check that you are in the right directory by looking at the files in the folder
+list.files()
+```
+
+```{r loadpackages, echo = FALSE, results = "hide", messages = FALSE}
+#Run all
+
+#Load required packages.
+
+pacman:: p_load(mgcv, 
+                sp, 
+                DescTools, 
+                plot3D,
+                tidyverse,
+                psych,
+                here,
+                readxl,
+                flextable,
+                ggplot2,
+                patchwork,
+                tidymodels,
+                patchwork,
+                dplyr,
+                TDAstats,
+                magick,
+                sf,
+                terra,
+                sp,
+                metR,
+                stringr,
+                rms,
+                mgcv,
+                MASS,
+                rptR,
+                ggstatsplot,
+                reshape2,
+                MuMIn,
+                lme4)
+
+# getting functions 
+source('Header_Functions_AL_YZF.R')
+
+```
+
+```{r telomere gams, echo = FALSE, results = "hide", messages = FALSE,warning=FALSE}
+# Subsetting the dataset
+keepVars_tel <- c("ID",
+                  "G217_TL_LN", 
+                  "G217_total_kj",
+              "G217_PROTEIN_kj",
+              "G217_TOTCHO_kj", 
+              "G217_TOTFAT_kj", 
+              "G217_PROP_PROT",
+              "G217_PROP_FAT",
+              "G217_PROP_CHO",
+              "G217_AGE",
+              "G217_IPAQ_CAT",
+              "G217_SM30",
+              "G217_AH40",
+              "G217_BMI",
+              "RACE",
+              "G100_FA_AGE",
+              "G100_Mo_Age",
+              "SEX",
+              "G220_birthweight_class",
+              "G220_preterm",
+              "G100_GESTDIAB",
+              "G100_BP_PROFILE",
+              "G100_NOW_ALC",
+              "G100_SMKNOW",
+              "G100_FA_SMK6MT")
+
+
+tel_compl <- data[, keepVars_tel] #dataset with these variables only
+
+tel_compl <- tel_compl[complete.cases(tel_compl),] #removes missing values
+
+tel_compl$sex <- as.factor(tel_compl$SEX)
+
+tel_compl_filt <- tel_compl 
+
+tel_compl_filt <- tel_compl_filt %>% dplyr::filter(G217_total_kj > 2999) #Exclude implausible intake data
+
+tel_compl_filt <- tel_compl_filt %>% dplyr::filter(G217_total_kj < 20000)
+
+#AICc model selection for covariates
+covar_tel <-lm(G217_TL_LN ~ G217_AGE +
+                G217_IPAQ_CAT+
+                G217_SM30+
+                G217_AH40+
+                G217_BMI+
+                RACE+
+                G100_FA_AGE+
+                G100_Mo_Age+
+                 G220_birthweight_class+
+                  G220_preterm+
+                 G100_GESTDIAB+
+              G100_BP_PROFILE+
+              G100_NOW_ALC+
+              G100_SMKNOW+
+              G100_FA_SMK6MT+
+                sex,
+                data=tel_compl_filt,
+               na.action = "na.fail"
+              )
+
+summary(covar_tel)
+
+covar_tel_candidate.models <- dredge(covar_tel, fixed = c("RACE", "sex","G217_AGE"))
+
+covar_tel_subset.models<- subset(covar_tel_candidate.models, delta < 2)
+model.sel(covar_tel_subset.models)
+
+#Gams modelling
+
+#Model 1 with sex as covariate
+GAM_tel <-gam(G217_TL_LN ~ s(G217_PROTEIN_kj) + 
+                s(G217_TOTCHO_kj) + 
+                s(G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj)+
+                G100_BP_PROFILE+
+                G100_FA_AGE+
+                G100_FA_SMK6MT+
+                G100_GESTDIAB+
+                G100_Mo_Age+
+                G217_AGE +
+                G217_AH40+
+                RACE+
+                sex,
+                data=tel_compl_filt,  method = "REML",
+              select = "TRUE"
+              )
+              
+gam.check(GAM_tel)
+summary(GAM_tel)
+
+#Model 2 stratified by sex
+GAM_tel_bysex <-gam(G217_TL_LN ~ s(G217_PROTEIN_kj, by = sex) + 
+                s(G217_TOTCHO_kj, by = sex) + 
+                s(G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex)+
+                G100_BP_PROFILE+
+                G100_FA_AGE+
+                G100_FA_SMK6MT+
+                G100_GESTDIAB+
+                G100_Mo_Age+
+                G217_AGE +
+                G217_AH40+
+                RACE,
+                data=tel_compl_filt,  method = "REML",
+              select = "TRUE"
+              )
+              
+
+gam.check(GAM_tel_bysex)
+summary(GAM_tel_bysex)
+```
+
+```{r IEAA gams, echo = FALSE, results = "hide", messages = FALSE,warning=FALSE}
+# Subsetting the dataset
+keepVars_horv <- c("ID",
+                  "IEAA",
+                  "G217_total_kj",
+              "G217_PROTEIN_kj",
+              "G217_TOTCHO_kj", 
+              "G217_TOTFAT_kj", 
+              "G217_AGE",
+              "G217_IPAQ_CAT",
+              "G217_SM30",
+              "G217_AH40",
+              "G217_BMI",
+              "RACE",
+              "G100_FA_AGE",
+              "G100_Mo_Age",
+              "SEX",
+              "G220_birthweight_class",
+              "G220_preterm",
+              "G100_GESTDIAB",
+              "G100_BP_PROFILE",
+              "G100_NOW_ALC",
+              "G100_SMKNOW",
+              "G100_FA_SMK6MT")
+
+horv_compl <- data[, keepVars_horv] #dataset with these variables only
+
+horv_compl <- horv_compl[complete.cases(horv_compl),] #removes missing values
+
+horv_compl$sex <- as.factor(horv_compl$SEX)
+
+horv_compl_filt <- horv_compl 
+
+horv_compl_filt <- horv_compl_filt %>% dplyr::filter(G217_total_kj > 2999) #Exclude implausible intake data
+
+horv_compl_filt <- horv_compl_filt %>% dplyr::filter(G217_total_kj < 20000)
+
+#AICc model selection for covariates
+covar_horv <-lm(IEAA ~ G217_IPAQ_CAT+
+                G217_SM30+
+                G217_AH40+
+                G217_BMI+
+                RACE+
+                G100_FA_AGE+
+                G100_Mo_Age+
+                 G220_birthweight_class+
+                  G220_preterm+
+                 G100_GESTDIAB+
+              G100_BP_PROFILE+
+              G100_NOW_ALC+
+              G100_SMKNOW+
+              G100_FA_SMK6MT+
+                sex,
+                data=horv_compl_filt,
+               na.action = "na.fail"
+              )
+
+summary(covar_horv)
+
+covar_horv_candidate.models <- dredge(covar_horv, fixed = c("RACE", "sex"))
+
+covar_horv_subset.models<- subset(covar_horv_candidate.models, delta < 2)
+model.sel(covar_horv_subset.models)
+
+#Gams modelling
+
+#Model 1 with sex as covariate
+
+GAM_horvath <-gam(IEAA ~ s(G217_PROTEIN_kj) + 
+                s(G217_TOTCHO_kj) + 
+                s(G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj)+
+                RACE+
+                  sex,
+                data=horv_compl_filt,  method = "REML",
+              select = "TRUE"
+              )
+
+gam.check(GAM_horvath)
+summary(GAM_horvath)
+
+
+#Model 2 stratified by sex
+GAM_horvath_bysex <-gam(IEAA ~ s(G217_PROTEIN_kj, by = sex) + 
+                s(G217_TOTCHO_kj, by = sex) + 
+                s(G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex)+
+                RACE,
+                data=horv_compl_filt,  method = "REML",
+              select = "TRUE"
+              )
+
+gam.check(GAM_horvath_bysex)
+summary(GAM_horvath_bysex)
+
+#Effect for female but not male. Let's plot for females
+
+RACE <- c("caucasian")
+sex <- c("female")
+
+covar_horv <- cbind(RACE,
+               sex)
+
+colnames(covar_horv)<- c("RACE",
+               "sex")
+
+horv_compl_filt_female <- horv_compl_filt %>% 
+  filter(sex == "female")
+
+#Plotting the protein x fat surface across the entire range of carbohydrate intake to examine the 3-way interaction effect
+
+horv_plot_female_carb <- ggSurfacetomo(GAM = GAM_horvath_bysex, 
+              data=horv_compl_filt_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              slicesnum = 40, 
+              ranges=c(-8.5,1.7))
+
+horv_plot_female_carb
+
+#Finding the peak and trough IEAA for females
+
+macropeak(GAM = GAM_horvath_bysex, 
+          data=horv_compl_filt_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv)
+
+macrotrough(GAM = GAM_horvath_bysex, 
+          data=horv_compl_filt_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv)
+
+#Sensitivity analysis to check for undue influence by residual outlier
+horv_compl_filt_sensi <- horv_compl_filt %>% dplyr::filter(IEAA > -14)
+
+GAM_horvath_sensi <-gam(IEAA ~ s(G217_PROTEIN_kj) + 
+                s(G217_TOTCHO_kj) + 
+                s(G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj)+
+                RACE+
+                  sex,
+                data=horv_compl_filt_sensi,  method = "REML",
+              select = "TRUE"
+              )
+
+gam.check(GAM_horvath_sensi)
+summary(GAM_horvath_sensi)
+
+GAM_horvath_bysex_sensi <-gam(IEAA ~ s(G217_PROTEIN_kj, by = sex) + 
+                s(G217_TOTCHO_kj, by = sex) + 
+                s(G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex)+
+                RACE,
+                data=horv_compl_filt_sensi,  method = "REML",
+              select = "TRUE"
+              )
+
+gam.check(GAM_horvath_bysex_sensi)
+summary(GAM_horvath_bysex_sensi)
+
+RACE <- c("caucasian")
+sex <- c("female")
+
+covar_horv <- cbind(RACE,
+               sex)
+
+colnames(covar_horv)<- c("RACE",
+               "sex")
+
+horv_compl_filt_sensi_female <- horv_compl_filt_sensi %>% 
+  filter(sex == "female")
+
+horv_plot_female_sensi_carb <- ggSurfacetomo(GAM = GAM_horvath_bysex_sensi, 
+              data=horv_compl_filt_sensi_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              slicesnum = 40, 
+              ranges=c(-9,4))
+
+horv_plot_female_sensi_carb
+
+#Same pattern after removing the point with outlier residual
+```
+
+```{r figIEAA, warning=FALSE, fig.cap="", fig.height = 6, fig.width = 12, dpi=300,fig.align = "center", echo=FALSE}
+quant25_carb_female <- quantile(horv_compl_filt_female$G217_TOTCHO_kj, 0.25)
+
+horv_plot_female_carb_quant25 <- ggSurface(GAM = GAM_horvath_bysex, 
+              data=horv_compl_filt_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=1.7,
+              z.val=quant25_carb_female,
+              subtitle="Carbohydrate = 2959 kJ (25th percentile)")
+
+quant50_carb_female <- quantile(horv_compl_filt_female$G217_TOTCHO_kj, 0.50)
+
+horv_plot_female_carb_quant50 <- ggSurface(GAM = GAM_horvath_bysex, 
+              data=horv_compl_filt_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=1.7,
+              z.val=quant50_carb_female,
+              subtitle="Carbohydrate = 3731 kJ (50th percentile)")
+
+quant75_carb_female <- quantile(horv_compl_filt_female$G217_TOTCHO_kj, 0.75)
+
+horv_plot_female_carb_quant75 <- ggSurface(GAM = GAM_horvath_bysex, 
+              data=horv_compl_filt_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=1.7,
+              z.val=quant75_carb_female,
+              subtitle="Carbohydrate = 4586 kJ (75th percentile)")
+
+quant99_carb_female <- quantile(horv_compl_filt_female$G217_TOTCHO_kj, 0.99)
+
+horv_plot_female_carb_quant99 <- ggSurface(GAM = GAM_horvath_bysex, 
+              data=horv_compl_filt_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=1.7,
+              z.val=quant99_carb_female,
+              subtitle="Carbohydrate = 7752 kJ (99th percentile)")
+
+IEAAsurface <- ((horv_plot_female_carb_quant25|
+                horv_plot_female_carb_quant50|
+                horv_plot_female_carb_quant75|
+                horv_plot_female_carb_quant99)| 
+                    plot_layout(axes = "collect"))
+
+
+```
+
+```{r figIEAAsensi, warning=FALSE, fig.cap="", fig.height = 6, fig.width = 12, dpi=300,fig.align = "center", echo=FALSE}
+
+RACE <- c("caucasian")
+sex <- c("female")
+
+covar_horv <- cbind(RACE,
+               sex)
+
+colnames(covar_horv)<- c("RACE",
+               "sex")
+
+horv_compl_filt_sensi_female <- horv_compl_filt_sensi %>% 
+  filter(sex == "female")
+
+
+quant25_carb_female <- quantile(horv_compl_filt_sensi_female$G217_TOTCHO_kj, 0.25)
+
+horv_plot_female_carb_quant25 <- ggSurface(GAM = GAM_horvath_bysex_sensi, 
+              data=horv_compl_filt_sensi_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=2.5,
+              z.val=quant25_carb_female,
+              subtitle="Carbohydrate = 2951 kJ (25th percentile)")
+
+quant50_carb_female <- quantile(horv_compl_filt_sensi_female$G217_TOTCHO_kj, 0.50)
+
+horv_plot_female_carb_quant50 <- ggSurface(GAM = GAM_horvath_bysex_sensi, 
+              data=horv_compl_filt_sensi_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=2.5,
+              z.val=quant50_carb_female,
+              subtitle="Carbohydrate = 3731 kJ (50th percentile)")
+
+quant75_carb_female <- quantile(horv_compl_filt_sensi_female$G217_TOTCHO_kj, 0.75)
+
+horv_plot_female_carb_quant75 <- ggSurface(GAM = GAM_horvath_bysex_sensi, 
+              data=horv_compl_filt_sensi_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=2.5,
+              z.val=quant75_carb_female,
+              subtitle="Carbohydrate = 4587 kJ (75th percentile)")
+
+quant99_carb_female <- quantile(horv_compl_filt_sensi_female$G217_TOTCHO_kj, 0.99)
+
+horv_plot_female_carb_quant99 <- ggSurface(GAM = GAM_horvath_bysex_sensi, 
+              data=horv_compl_filt_sensi_female, 
+              XYZ=c("G217_PROTEIN_kj",  "G217_TOTFAT_kj", "G217_TOTCHO_kj"), 
+              labels=c("Protein (kJ)", "Fat (kJ)", "Carbohydrate (kJ)"), 
+              predict_val= covar_horv, 
+              surf_min=-8.5, 
+              surf_max=2.5,
+              z.val=quant99_carb_female,
+              subtitle="Carbohydrate = 7755 kJ (99th percentile)")
+
+IEAAsurface_sensi <- ((horv_plot_female_carb_quant25|
+                horv_plot_female_carb_quant50|
+                horv_plot_female_carb_quant75|
+                horv_plot_female_carb_quant99)| 
+                    plot_layout(axes = "collect"))
+
+
+```
+
+```{r EEAA gams, echo = FALSE, results = "hide", messages = FALSE,warning=FALSE}
+# Subsetting the dataset
+keepVars_hannum <- c("ID",
+                  "EEAA",
+                  "G217_total_kj",
+              "G217_PROTEIN_kj",
+              "G217_TOTCHO_kj", 
+              "G217_TOTFAT_kj", 
+              "G217_AGE",
+              "G217_IPAQ_CAT",
+              "G217_SM30",
+              "G217_AH40",
+              "G217_BMI",
+              "RACE",
+              "G100_FA_AGE",
+              "G100_Mo_Age",
+              "SEX",
+              "G220_birthweight_class",
+              "G220_preterm",
+              "G100_GESTDIAB",
+              "G100_BP_PROFILE",
+              "G100_NOW_ALC",
+              "G100_SMKNOW",
+              "G100_FA_SMK6MT")
+
+hannum_compl <- data[, keepVars_hannum] #dataset with these variables only
+
+hannum_compl <- hannum_compl[complete.cases(hannum_compl),] #removes missing values
+
+hannum_compl$sex <- as.factor(hannum_compl$SEX)
+
+hannum_compl_filt <- hannum_compl 
+
+hannum_compl_filt <- hannum_compl_filt %>% dplyr::filter(G217_total_kj > 2999) #Excluding implausible intake data
+
+hannum_compl_filt <- hannum_compl_filt %>% dplyr::filter(G217_total_kj < 20000)
+
+#AICc model selection for covariates
+covar_hannum <-lm(EEAA ~ G217_IPAQ_CAT+
+                G217_SM30+
+                G217_AH40+
+                G217_BMI+
+                RACE+
+                G100_FA_AGE+
+                G100_Mo_Age+
+                 G220_birthweight_class+
+                  G220_preterm+
+                 G100_GESTDIAB+
+              G100_BP_PROFILE+
+              G100_NOW_ALC+
+              G100_SMKNOW+
+              G100_FA_SMK6MT+
+                sex,
+                data=hannum_compl_filt,
+               na.action = "na.fail"
+              )
+
+summary(covar_hannum)
+
+covar_hannum_candidate.models <- dredge(covar_hannum, fixed = c("RACE", "sex"))
+
+covar_hannum_subset.models<- subset(covar_hannum_candidate.models, delta < 2)
+model.sel(covar_hannum_subset.models)
+
+#Gams modelling
+
+#Model 1 with sex as covariate
+GAM_hannum <-gam(EEAA ~ s(G217_PROTEIN_kj) + 
+                s(G217_TOTCHO_kj) + 
+                s(G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj)+
+                  G100_FA_AGE+
+                  G100_FA_SMK6MT+
+                  G100_GESTDIAB+
+                  G100_Mo_Age+
+                  G217_BMI+
+                  G217_IPAQ_CAT+
+                  G220_birthweight_class+
+                RACE+
+                  sex,
+                data=hannum_compl_filt,  method = "REML",
+              select = "TRUE"
+              )
+
+gam.check(GAM_hannum)
+summary(GAM_hannum)
+
+#Model 2 stratified by sex 
+GAM_hannum_bysex <-gam(EEAA ~ s(G217_PROTEIN_kj, by = sex) + 
+                s(G217_TOTCHO_kj, by = sex) + 
+                s(G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex) + 
+                ti(G217_PROTEIN_kj, G217_TOTCHO_kj, G217_TOTFAT_kj, by = sex)+
+                  G100_FA_AGE+
+                  G100_FA_SMK6MT+
+                  G100_GESTDIAB+
+                  G100_Mo_Age+
+                  G217_BMI+
+                  relevel(G217_IPAQ_CAT,"Low")+
+                  G220_birthweight_class+
+                RACE,
+                data=hannum_compl_filt,  method = "REML",
+              select = "TRUE"
+              )
+
+gam.check(GAM_hannum_bysex)
+summary(GAM_hannum_bysex)
+```
+
+```{r correl ageing, echo = FALSE, results = "hide", messages = FALSE,warning=FALSE}
+# Correlations between biological ageing measures
+
+# Subsetting the dataset
+keepVars_correl <- c("ID",
+                  "IEAA",
+                  "EEAA",
+                  "G217_TL_LN", 
+                  "G217_total_kj",
+              "G217_PROTEIN_kj",
+              "G217_TOTCHO_kj", 
+              "G217_TOTFAT_kj", 
+              "G217_PROP_PROT",
+              "G217_PROP_FAT",
+              "G217_PROP_CHO",
+              "G217_AGE",
+              "G217_IPAQ_CAT",
+              "G217_SM30",
+              "G217_AH40",
+              "G217_BMI",
+              "RACE",
+              "G100_FA_AGE",
+              "G100_Mo_Age",
+              "SEX",
+              "G220_birthweight_class",
+              "G220_preterm",
+              "G100_GESTDIAB",
+              "G100_BP_PROFILE",
+              "G100_NOW_ALC",
+              "G100_SMKNOW",
+              "G100_FA_SMK6MT")
+
+
+correl_compl <- data[, keepVars_correl] #dataset with these variables only
+
+correl_compl <- correl_compl[complete.cases(correl_compl),] #removes missing values
+
+correl_compl$sex <- as.factor(correl_compl$SEX)
+
+correl_compl_filt <- correl_compl 
+
+correl_compl_filt <- correl_compl_filt %>% dplyr::filter(G217_total_kj > 2999) #Exclude implausible intake values
+
+correl_compl_filt <- correl_compl_filt %>% dplyr::filter(G217_total_kj < 20000)
+
+ageing_correl <- correl_compl_filt %>% dplyr::select(c("IEAA","EEAA","G217_TL_LN"))
+
+corr.test(ageing_correl)
+```
+
